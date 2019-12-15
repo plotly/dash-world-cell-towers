@@ -1,6 +1,7 @@
 dash>=1.7.0
 datashader>=0.8
 dask>=2.0
+distributed
 numpy
 pandas
 pyproj

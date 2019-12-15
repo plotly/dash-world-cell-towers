@@ -15,13 +15,11 @@ import datashader as ds
 import datashader.transfer_functions as tf
 import numpy as np
 import pandas as pd
+from distributed import Client, LocalCluster
 
 # Optional: Connect to distributed dask cluster
-# scheduler_url = None
-scheduler_url = "localhost:8786"
-if scheduler_url:
-    from distributed import Client
-    client = Client(scheduler_url)
+scheduler_url = None  # Use LocalCluster
+# scheduler_url = "localhost:8786"
 
 # Radio constants
 radio_categories = ['UMTS', 'LTE', 'GSM', 'CDMA']
@@ -66,71 +64,6 @@ def epsg_4326_to_3857(coords):
 transformer_3857_to_4326 = Transformer.from_crs("epsg:3857", "epsg:4326")
 def epsg_3857_to_4326(coords):
     return [list(reversed(transformer_3857_to_4326.transform(*row))) for row in coords]
-
-
-# Load and preprocess dataset
-ddf = dd.read_parquet('./data/cell_towers.parq')
-ddf['radio'] = ddf['radio'].cat.as_known()
-ddf['Description'] = ddf['Description'].cat.as_known()
-ddf['Status'] = ddf['Status'].cat.as_known()
-ddf['log10_range'] = np.log10(ddf['range'])
-
-# Select columns to persist
-ddf = ddf[[
-    'radio', 'x_3857', 'y_3857', 'log10_range', 'created',  # Filtering
-    'lat', 'lon', 'Description', 'Status', 'mcc', 'net'  # Hover info
-]]
-
-# Persist Dask dataframe in memory
-ddf = ddf.repartition(npartitions=8).persist()
-
-data_3857 = dask.compute(
-    [ddf['x_3857'].min(), ddf['y_3857'].min()],
-    [ddf['x_3857'].max(), ddf['y_3857'].max()],
-)
-data_center_3857 = [[
-    (data_3857[0][0] + data_3857[1][0]) / 2.0,
-    (data_3857[0][1] + data_3857[1][1]) / 2.0,
-    ]]
-data_4326 = epsg_3857_to_4326(data_3857)
-data_center_4326 = epsg_3857_to_4326(data_center_3857)
-
-# Create bin edges
-quarter_bins = pd.date_range('2003', '2020', freq='QS')
-created_bin_edges = quarter_bins[0::4]
-created_bin_centers = quarter_bins[2::4]
-created_bins = created_bin_edges.astype('int')
-
-min_log10_range, max_log10_range = dask.compute(
-    ddf['log10_range'].min(), ddf['log10_range'].max()
-)
-
-
-def compute_range_created_radio_hist(ddf):
-    """
-    Use Datashader to compute a 3D histogram of ddf, binned by the created,
-    log10_range, and radio dimensions
-    """
-    cvs2 = ds.Canvas(
-        # Specify created bins
-        plot_width=len(created_bins) - 1, x_range=[min(created_bins), max(created_bins)],
-
-        # Specify log10_range bins
-        plot_height=20, y_range=[min_log10_range, max_log10_range]
-    )
-    agg = cvs2.points(ddf, x='created', y='log10_range', agg=ds.count_cat('radio'))
-
-    # Set created index back to datetime values
-    agg = agg.assign_coords(created=created_bin_centers)
-
-    return agg
-
-
-# Pre-compute histograms containing all observations
-total_range_created_radio_agg = compute_range_created_radio_hist(ddf)
-total_radio_counts = total_range_created_radio_agg.sum(['log10_range', 'created']).to_series()
-total_range_counts = total_range_created_radio_agg.sum(['radio', 'created']).to_series()
-total_created_counts = total_range_created_radio_agg.sum(['log10_range', 'radio']).to_series()
 
 
 # Load mapbox token
@@ -383,533 +316,610 @@ app.layout = html.Div(children=[
 ])
 
 
-# Create show/hide callbacks for each info modal
-for id in ['indicator', 'radio', 'map', 'range', 'created']:
-    @app.callback([Output(f"{id}-modal", 'style'), Output(f"{id}-div", 'style')],
-                  [Input(f'show-{id}-modal', 'n_clicks'),
-                   Input(f'close-{id}-modal', 'n_clicks')])
-    def toggle_modal(n_show, n_close):
-        ctx = dash.callback_context
-        if ctx.triggered and ctx.triggered[0]['prop_id'].startswith('show-'):
-            return {"display": "block"}, {'zIndex': 1003}
+def compute_range_created_radio_hist(ddf):
+    """
+    Use Datashader to compute a 3D histogram of ddf, binned by the created,
+    log10_range, and radio dimensions
+    """
+    cvs2 = ds.Canvas(
+        # Specify created bins
+        plot_width=len(created_bins) - 1,
+        x_range=[min(created_bins), max(created_bins)],
+
+        # Specify log10_range bins
+        plot_height=20, y_range=[min_log10_range, max_log10_range]
+    )
+    agg = cvs2.points(ddf, x='created', y='log10_range', agg=ds.count_cat('radio'))
+
+    # Set created index back to datetime values
+    agg = agg.assign_coords(created=created_bin_centers)
+
+    return agg
+
+
+if __name__ == '__main__':
+    # Note: The creation of a Dask LocalCluster must happen inside the `__main__` block,
+    # that is so much logic is defined here.
+    if scheduler_url:
+        print(f"Connecting to cluster at {scheduler_url} ... ", end='')
+        client = Client(scheduler_url)
+        print("done")
+    else:
+        print("Creating LocalCluster... ", end='')
+        cluster = LocalCluster()
+        client = Client(cluster)
+        print("done")
+
+    # Load and preprocess dataset
+    ddf = dd.read_parquet('./data/cell_towers.parq')
+    ddf['radio'] = ddf['radio'].cat.as_known()
+    ddf['Description'] = ddf['Description'].cat.as_known()
+    ddf['Status'] = ddf['Status'].cat.as_known()
+    ddf['log10_range'] = np.log10(ddf['range'])
+
+    # Select columns to persist
+    ddf = ddf[[
+        'radio', 'x_3857', 'y_3857', 'log10_range', 'created',  # Filtering
+        'lat', 'lon', 'Description', 'Status', 'mcc', 'net'  # Hover info
+    ]]
+
+    # Persist Dask dataframe in memory
+    ddf = ddf.repartition(npartitions=8).persist()
+
+    data_3857 = dask.compute(
+        [ddf['x_3857'].min(), ddf['y_3857'].min()],
+        [ddf['x_3857'].max(), ddf['y_3857'].max()],
+    )
+    data_center_3857 = [[
+        (data_3857[0][0] + data_3857[1][0]) / 2.0,
+        (data_3857[0][1] + data_3857[1][1]) / 2.0,
+    ]]
+    data_4326 = epsg_3857_to_4326(data_3857)
+    data_center_4326 = epsg_3857_to_4326(data_center_3857)
+
+    # Create bin edges
+    quarter_bins = pd.date_range('2003', '2020', freq='QS')
+    created_bin_edges = quarter_bins[0::4]
+    created_bin_centers = quarter_bins[2::4]
+    created_bins = created_bin_edges.astype('int')
+
+    min_log10_range, max_log10_range = dask.compute(
+        ddf['log10_range'].min(), ddf['log10_range'].max()
+    )
+
+    # Pre-compute histograms containing all observations
+    total_range_created_radio_agg = compute_range_created_radio_hist(ddf)
+    total_radio_counts = total_range_created_radio_agg.sum(
+        ['log10_range', 'created']).to_series()
+    total_range_counts = total_range_created_radio_agg.sum(
+        ['radio', 'created']).to_series()
+    total_created_counts = total_range_created_radio_agg.sum(
+        ['log10_range', 'radio']).to_series()
+
+    # Create show/hide callbacks for each info modal
+    for id in ['indicator', 'radio', 'map', 'range', 'created']:
+        @app.callback([Output(f"{id}-modal", 'style'), Output(f"{id}-div", 'style')],
+                      [Input(f'show-{id}-modal', 'n_clicks'),
+                       Input(f'close-{id}-modal', 'n_clicks')])
+        def toggle_modal(n_show, n_close):
+            ctx = dash.callback_context
+            if ctx.triggered and ctx.triggered[0]['prop_id'].startswith('show-'):
+                return {"display": "block"}, {'zIndex': 1003}
+            else:
+                return {"display": "none"}, {'zIndex': 0}
+
+    # Create clear/reset button callbacks
+    @app.callback(
+        Output('map-graph', 'relayoutData'),
+        [Input('reset-map', 'n_clicks'), Input('clear-all', 'n_clicks')]
+    )
+    def reset_map(*args):
+        return None
+
+
+    @app.callback(
+        Output('radio-histogram', 'selectedData'),
+        [Input('clear-radio', 'n_clicks'), Input('clear-all', 'n_clicks')]
+    )
+    def clear_radio_hist_selections(*args):
+        return None
+
+
+    @app.callback(
+        Output('range-histogram', 'selectedData'),
+        [Input('clear-range', 'n_clicks'), Input('clear-all', 'n_clicks')]
+    )
+    def clear_range_hist_selections(*args):
+        return None
+
+
+    @app.callback(
+        Output('created-histogram', 'selectedData'),
+        [Input('clear-created', 'n_clicks'), Input('clear-all', 'n_clicks')]
+    )
+    def clear_created_hist_selection(*args):
+        return None
+
+
+    @app.callback(
+        [Output('indicator-graph', 'figure'), Output('map-graph', 'figure'),
+         Output('radio-histogram', 'figure'), Output('range-histogram', 'figure'),
+         Output('created-histogram', 'figure')],
+        [Input('map-graph', 'relayoutData'), Input('radio-histogram', 'selectedData'),
+         Input('range-histogram', 'selectedData'), Input('created-histogram', 'selectedData')])
+    def update_plots(
+            relayout_data, selected_radio, selected_range, selected_created,
+    ):
+        t0 = time.time()
+        coordinates_4326 = relayout_data and relayout_data.get('mapbox._derived', {}).get('coordinates', None)
+
+        if coordinates_4326:
+            lons, lats = zip(*coordinates_4326)
+            lon0, lon1 = max(min(lons), data_4326[0][0]), min(max(lons), data_4326[1][0])
+            lat0, lat1 = max(min(lats), data_4326[0][1]), min(max(lats), data_4326[1][1])
+            coordinates_4326 = [
+                [lon0, lat0],
+                [lon1, lat1],
+            ]
+            coordinates_3857 = epsg_4326_to_3857(coordinates_4326)
+            # position = {}
+            position = {
+                'zoom': relayout_data.get('mapbox.zoom', None),
+                'center': relayout_data.get('mapbox.center', None)
+            }
         else:
-            return {"display": "none"}, {'zIndex': 0}
+            position = {
+                'zoom': 0.5,
+                'pitch': 0,
+                'bearing': 0,
+                'center': {'lon': data_center_4326[0][0], 'lat': data_center_4326[0][1]}
+            }
+            coordinates_3857 = data_3857
+            coordinates_4326 = data_4326
 
-
-# Create clear/reset button callbacks
-@app.callback(
-    Output('map-graph', 'relayoutData'),
-    [Input('reset-map', 'n_clicks'), Input('clear-all', 'n_clicks')]
-)
-def reset_map(*args):
-    return None
-
-
-@app.callback(
-    Output('radio-histogram', 'selectedData'),
-    [Input('clear-radio', 'n_clicks'), Input('clear-all', 'n_clicks')]
-)
-def clear_radio_hist_selections(*args):
-    return None
-
-
-@app.callback(
-    Output('range-histogram', 'selectedData'),
-    [Input('clear-range', 'n_clicks'), Input('clear-all', 'n_clicks')]
-)
-def clear_range_hist_selections(*args):
-    return None
-
-
-@app.callback(
-    Output('created-histogram', 'selectedData'),
-    [Input('clear-created', 'n_clicks'), Input('clear-all', 'n_clicks')]
-)
-def clear_created_hist_selection(*args):
-    return None
-
-
-@app.callback(
-    [Output('indicator-graph', 'figure'), Output('map-graph', 'figure'),
-     Output('radio-histogram', 'figure'), Output('range-histogram', 'figure'),
-     Output('created-histogram', 'figure')],
-    [Input('map-graph', 'relayoutData'), Input('radio-histogram', 'selectedData'),
-     Input('range-histogram', 'selectedData'), Input('created-histogram', 'selectedData')])
-def update_plots(
-        relayout_data, selected_radio, selected_range, selected_created,
-):
-    t0 = time.time()
-    coordinates_4326 = relayout_data and relayout_data.get('mapbox._derived', {}).get('coordinates', None)
-
-    if coordinates_4326:
-        lons, lats = zip(*coordinates_4326)
-        lon0, lon1 = max(min(lons), data_4326[0][0]), min(max(lons), data_4326[1][0])
-        lat0, lat1 = max(min(lats), data_4326[0][1]), min(max(lats), data_4326[1][1])
-        coordinates_4326 = [
-            [lon0, lat0],
-            [lon1, lat1],
+        new_coordinates = [
+            [coordinates_4326[0][0], coordinates_4326[1][1]],
+            [coordinates_4326[1][0], coordinates_4326[1][1]],
+            [coordinates_4326[1][0], coordinates_4326[0][1]],
+            [coordinates_4326[0][0], coordinates_4326[0][1]],
         ]
-        coordinates_3857 = epsg_4326_to_3857(coordinates_4326)
-        # position = {}
-        position = {
-            'zoom': relayout_data.get('mapbox.zoom', None),
-            'center': relayout_data.get('mapbox.center', None)
-        }
-    else:
-        position = {
-            'zoom': 0.5,
-            'pitch': 0,
-            'bearing': 0,
-            'center': {'lon': data_center_4326[0][0], 'lat': data_center_4326[0][1]}
-        }
-        coordinates_3857 = data_3857
-        coordinates_4326 = data_4326
 
-    new_coordinates = [
-        [coordinates_4326[0][0], coordinates_4326[1][1]],
-        [coordinates_4326[1][0], coordinates_4326[1][1]],
-        [coordinates_4326[1][0], coordinates_4326[0][1]],
-        [coordinates_4326[0][0], coordinates_4326[0][1]],
-    ]
+        x_range, y_range = zip(*coordinates_3857)
+        x0, x1 = x_range
+        y0, y1 = y_range
 
-    x_range, y_range = zip(*coordinates_3857)
-    x0, x1 = x_range
-    y0, y1 = y_range
+        # Build query expressions
+        query_expr_xy = f"(x_3857 >= {x0}) & (x_3857 <= {x1}) & (y_3857 >= {y0}) & (y_3857 <= {y1})"
+        query_expr_range_created_parts = []
 
-    # Build query expressions
-    query_expr_xy = f"(x_3857 >= {x0}) & (x_3857 <= {x1}) & (y_3857 >= {y0}) & (y_3857 <= {y1})"
-    query_expr_range_created_parts = []
+        # Handle range selection
+        range_slice = slice(None, None)
+        if selected_range:
+            log10_r0, log10_r1 = selected_range['range']['x']
+            if log10_r1 < log10_r0:
+                log10_r0, log10_r1 = log10_r1, log10_r0
+            range_slice = slice(log10_r0, log10_r1)
 
-    # Handle range selection
-    range_slice = slice(None, None)
-    if selected_range:
-        log10_r0, log10_r1 = selected_range['range']['x']
-        if log10_r1 < log10_r0:
-            log10_r0, log10_r1 = log10_r1, log10_r0
-        range_slice = slice(log10_r0, log10_r1)
+            query_expr_range_created_parts.append(
+                f"(log10_range >= {log10_r0}) & (log10_range <= {log10_r1})"
+            )
 
-        query_expr_range_created_parts.append(
-            f"(log10_range >= {log10_r0}) & (log10_range <= {log10_r1})"
+        # Handle created selection
+        created_slice = slice(None, None)
+        if selected_created:
+            created_dt0, created_dt1 = pd.to_datetime(selected_created['range']['x'])
+            if created_dt1 < created_dt0:
+                created_dt0, created_dt1 = created_dt1, created_dt0
+            created_slice = slice(created_dt0, created_dt1)
+
+            created0, created1 = pd.Series([created_dt0, created_dt1]).astype('int')
+            query_expr_range_created_parts.append(
+                f"(created >= {created0}) & (created <= {created1})"
+            )
+
+        # Get selected radio categories
+        selected_radio_categories = radio_categories
+        if selected_radio:
+            selected_radio_categories = list(set(
+                point['y'] for point in selected_radio['points']
+            ))
+
+        # Build dataframe containing rows that satisfy the range and created selections
+        if query_expr_range_created_parts:
+            query_expr_range_created = ' & '.join(query_expr_range_created_parts)
+            ddf_selected_range_created = ddf.query(
+                query_expr_range_created
+            )
+        else:
+            ddf_selected_range_created = ddf
+
+        # Build dataframe containing rows of towers within the map viewport
+        ddf_xy = ddf.query(query_expr_xy) if query_expr_xy else ddf
+
+        # Build map figure
+        # Create datashader aggregation of x/y data that satisfies the range and created
+        # histogram selections
+        cvs = ds.Canvas(
+            plot_width=700,
+            plot_height=400,
+            x_range=x_range, y_range=y_range
+        )
+        agg = cvs.points(
+            ddf_selected_range_created, x='x_3857', y='y_3857', agg=ds.count_cat('radio')
         )
 
-    # Handle created selection
-    created_slice = slice(None, None)
-    if selected_created:
-        created_dt0, created_dt1 = pd.to_datetime(selected_created['range']['x'])
-        if created_dt1 < created_dt0:
-            created_dt0, created_dt1 = created_dt1, created_dt0
-        created_slice = slice(created_dt0, created_dt1)
+        # Downselect aggregation to include only the select radio categories
+        if selected_radio_categories:
+            agg = agg.sel(radio=selected_radio_categories)
 
-        created0, created1 = pd.Series([created_dt0, created_dt1]).astype('int')
-        query_expr_range_created_parts.append(
-            f"(created >= {created0}) & (created <= {created1})"
-        )
+        # Count the number of selected towers
+        n_selected = int(agg.sum())
 
-    # Get selected radio categories
-    selected_radio_categories = radio_categories
-    if selected_radio:
-        selected_radio_categories = list(set(
-            point['y'] for point in selected_radio['points']
-        ))
-
-    # Build dataframe containing rows that satisfy the range and created selections
-    if query_expr_range_created_parts:
-        query_expr_range_created = ' & '.join(query_expr_range_created_parts)
-        ddf_selected_range_created = ddf.query(
-            query_expr_range_created
-        )
-    else:
-        ddf_selected_range_created = ddf
-
-    # Build dataframe containing rows of towers within the map viewport
-    ddf_xy = ddf.query(query_expr_xy) if query_expr_xy else ddf
-
-    # Build map figure
-    # Create datashader aggregation of x/y data that satisfies the range and created
-    # histogram selections
-    cvs = ds.Canvas(
-        plot_width=700,
-        plot_height=400,
-        x_range=x_range, y_range=y_range
-    )
-    agg = cvs.points(
-        ddf_selected_range_created, x='x_3857', y='y_3857', agg=ds.count_cat('radio')
-    )
-
-    # Downselect aggregation to include only the select radio categories
-    if selected_radio_categories:
-        agg = agg.sel(radio=selected_radio_categories)
-
-    # Count the number of selected towers
-    n_selected = int(agg.sum())
-
-    # Build indicator figure
-    n_selected_indicator = {
-        'data': [{
-            'type': 'indicator',
-            'value': n_selected,
-            'number': {
-                'font': {
-                    'color': '#263238'
+        # Build indicator figure
+        n_selected_indicator = {
+            'data': [{
+                'type': 'indicator',
+                'value': n_selected,
+                'number': {
+                    'font': {
+                        'color': '#263238'
+                    }
                 }
+            }],
+            'layout': {
+                'template': template,
+                'height': 150,
+                'margin': {'l': 10, 'r': 10, 't': 10, 'b': 10}
             }
-        }],
-        'layout': {
-            'template': template,
-            'height': 150,
-            'margin': {'l': 10, 'r': 10, 't': 10, 'b': 10}
-        }
-    }
-
-    if n_selected == 0:
-        # Nothing to display
-        lat = [None]
-        lon = [None]
-        customdata = [None]
-        marker = {}
-        layers = []
-    elif n_selected < 5000:
-        # Display each individual point using a scattermapbox trace. This way we can
-        # give each individual point a tooltip
-        ddf_small_expr = ' & '.join(
-            [query_expr_xy] + [f'(radio in {selected_radio_categories})'] +
-            query_expr_range_created_parts
-        )
-        ddf_small = ddf.query(ddf_small_expr)
-        lat, lon, radio, log10_range, description, mcc, net, created, status = dask.compute(
-            ddf_small.lat, ddf_small.lon, ddf_small.radio, ddf_small.log10_range,
-            ddf_small.Description, ddf_small.mcc, ddf_small.net, ddf_small.created,
-            ddf_small.Status
-        )
-
-        # Format creation date column for tooltip
-        created = pd.to_datetime(created.tolist()).strftime('%x')
-
-        # Build colorscale to give scattermapbox points the appropriate color
-        radio_colorscale = [
-            [v, radio_colors[cat]] for v, cat in zip(
-                np.linspace(0, 1, len(radio.cat.categories)), radio.cat.categories
-            )
-        ]
-
-        # Build array of the integer category codes to use as the numeric color array
-        # for the scattermapbox trace
-        radio_codes = radio.cat.codes
-
-        # Build marker properties dict
-        marker = {
-            'color': radio_codes,
-            'colorscale': radio_colorscale,
-            'cmin': 0,
-            'cmax': 3,
-            'size': 5,
-            'opacity': 0.6,
         }
 
-        # Build customdata array for use in hovertemplate
-        def to_str_unknown(cat_series):
-            result = cat_series.astype(str)
-            result[pd.isnull(cat_series)] = "Unknown"
-            return result
-
-        customdata = list(zip(
-            radio.astype(str),
-            ((10 ** log10_range)).astype(int),
-            [s[:25] for s in to_str_unknown(description)],
-            mcc,
-            net,
-            created,
-            to_str_unknown(status),
-        ))
-        layers = []
-    else:
-        # Shade aggregation into an image that we can add to the map as a mapbox
-        # image layer
-        img = tf.shade(agg, color_key=radio_colors, min_alpha=100).to_pil()
-
-        # Resize image to map size to reduce image blurring on zoom.
-        img = img.resize((1400, 800))
-
-        # Add image as mapbox image layer. Note that as of version 4.4, plotly will
-        # automatically convert the PIL image object into a base64 encoded png string
-        layers = [
-            {
-                "sourcetype": "image",
-                "source": img,
-                "coordinates": new_coordinates
-            }
-        ]
-
-        # Do not display any mapbox markers
-        lat = [None]
-        lon = [None]
-        customdata = [None]
-        marker = {}
-
-    # Build map figure
-    map_graph = {
-        'data': [{
-            'type': 'scattermapbox',
-            'lat': lat, 'lon': lon,
-            'customdata': customdata,
-            'marker': marker,
-            'hovertemplate': (
-                "<b>%{customdata[2]}</b><br>"
-                "MCC: %{customdata[3]}<br>"
-                "MNC: %{customdata[4]}<br>"
-                "radio: %{customdata[0]}<br>"
-                "range: %{customdata[1]:,} m<br>"
-                "created: %{customdata[5]}<br>"
-                "status: %{customdata[6]}<br>"
-                "longitude: %{lon:.3f}&deg;<br>"
-                "latitude: %{lat:.3f}&deg;<br>"
-                "<extra></extra>"
+        if n_selected == 0:
+            # Nothing to display
+            lat = [None]
+            lon = [None]
+            customdata = [None]
+            marker = {}
+            layers = []
+        elif n_selected < 5000:
+            # Display each individual point using a scattermapbox trace. This way we can
+            # give each individual point a tooltip
+            ddf_small_expr = ' & '.join(
+                [query_expr_xy] + [f'(radio in {selected_radio_categories})'] +
+                query_expr_range_created_parts
             )
-        }],
-        'layout': {
-            'template': template,
-            'uirevision': True,
-            'mapbox': {
-                'style': "light",
-                'accesstoken': token,
-                'layers': layers,
+            ddf_small = ddf.query(ddf_small_expr)
+            lat, lon, radio, log10_range, description, mcc, net, created, status = dask.compute(
+                ddf_small.lat, ddf_small.lon, ddf_small.radio, ddf_small.log10_range,
+                ddf_small.Description, ddf_small.mcc, ddf_small.net, ddf_small.created,
+                ddf_small.Status
+            )
+
+            # Format creation date column for tooltip
+            created = pd.to_datetime(created.tolist()).strftime('%x')
+
+            # Build colorscale to give scattermapbox points the appropriate color
+            radio_colorscale = [
+                [v, radio_colors[cat]] for v, cat in zip(
+                    np.linspace(0, 1, len(radio.cat.categories)), radio.cat.categories
+                )
+            ]
+
+            # Build array of the integer category codes to use as the numeric color array
+            # for the scattermapbox trace
+            radio_codes = radio.cat.codes
+
+            # Build marker properties dict
+            marker = {
+                'color': radio_codes,
+                'colorscale': radio_colorscale,
+                'cmin': 0,
+                'cmax': 3,
+                'size': 5,
+                'opacity': 0.6,
+            }
+
+            # Build customdata array for use in hovertemplate
+            def to_str_unknown(cat_series):
+                result = cat_series.astype(str)
+                result[pd.isnull(cat_series)] = "Unknown"
+                return result
+
+            customdata = list(zip(
+                radio.astype(str),
+                ((10 ** log10_range)).astype(int),
+                [s[:25] for s in to_str_unknown(description)],
+                mcc,
+                net,
+                created,
+                to_str_unknown(status),
+            ))
+            layers = []
+        else:
+            # Shade aggregation into an image that we can add to the map as a mapbox
+            # image layer
+            img = tf.shade(agg, color_key=radio_colors, min_alpha=100).to_pil()
+
+            # Resize image to map size to reduce image blurring on zoom.
+            img = img.resize((1400, 800))
+
+            # Add image as mapbox image layer. Note that as of version 4.4, plotly will
+            # automatically convert the PIL image object into a base64 encoded png string
+            layers = [
+                {
+                    "sourcetype": "image",
+                    "source": img,
+                    "coordinates": new_coordinates
+                }
+            ]
+
+            # Do not display any mapbox markers
+            lat = [None]
+            lon = [None]
+            customdata = [None]
+            marker = {}
+
+        # Build map figure
+        map_graph = {
+            'data': [{
+                'type': 'scattermapbox',
+                'lat': lat, 'lon': lon,
+                'customdata': customdata,
+                'marker': marker,
+                'hovertemplate': (
+                    "<b>%{customdata[2]}</b><br>"
+                    "MCC: %{customdata[3]}<br>"
+                    "MNC: %{customdata[4]}<br>"
+                    "radio: %{customdata[0]}<br>"
+                    "range: %{customdata[1]:,} m<br>"
+                    "created: %{customdata[5]}<br>"
+                    "status: %{customdata[6]}<br>"
+                    "longitude: %{lon:.3f}&deg;<br>"
+                    "latitude: %{lat:.3f}&deg;<br>"
+                    "<extra></extra>"
+                )
+            }],
+            'layout': {
+                'template': template,
+                'uirevision': True,
+                'mapbox': {
+                    'style': "light",
+                    'accesstoken': token,
+                    'layers': layers,
+                },
+                'margin': {"r": 0, "t": 0, "l": 0, "b": 0},
+                'height': 500,
+                'shapes': [{
+                    'type': 'rect',
+                    'xref': 'paper',
+                    'yref': 'paper',
+                    'x0': 0,
+                    'y0': 0,
+                    'x1': 1,
+                    'y1': 1,
+                    'line': {
+                        'width': 2,
+                        'color': '#B0BEC5',
+                    }
+                }]
             },
-            'margin': {"r": 0, "t": 0, "l": 0, "b": 0},
-            'height': 500,
-            'shapes': [{
-                'type': 'rect',
-                'xref': 'paper',
-                'yref': 'paper',
-                'x0': 0,
-                'y0': 0,
-                'x1': 1,
-                'y1': 1,
-                'line': {
-                    'width': 2,
-                    'color': '#B0BEC5',
-                }
-            }]
-        },
-    }
+        }
 
-    map_graph['layout']['mapbox'].update(position)
+        map_graph['layout']['mapbox'].update(position)
 
-    # Use datashader to histogram range, created, and radio simultaneously
-    agg_range_created_radio = compute_range_created_radio_hist(ddf_xy)
+        # Use datashader to histogram range, created, and radio simultaneously
+        agg_range_created_radio = compute_range_created_radio_hist(ddf_xy)
 
-    # Build radio histogram
-    selected_radio_counts = agg_range_created_radio.sel(
-        log10_range=range_slice, created=created_slice
-    ).sum(['log10_range', 'created']).to_series()
-    radio_histogram = build_radio_histogram(
-        selected_radio_counts, selected_radio is None
-    )
+        # Build radio histogram
+        selected_radio_counts = agg_range_created_radio.sel(
+            log10_range=range_slice, created=created_slice
+        ).sum(['log10_range', 'created']).to_series()
+        radio_histogram = build_radio_histogram(
+            selected_radio_counts, selected_radio is None
+        )
 
-    # Build range histogram
-    selected_range_counts = agg_range_created_radio.sel(
-        radio=selected_radio_categories, created=created_slice
-    ).sum(['radio', 'created']).to_series()
-    range_histogram = build_range_histogram(
-        selected_range_counts, selected_range is None
-    )
+        # Build range histogram
+        selected_range_counts = agg_range_created_radio.sel(
+            radio=selected_radio_categories, created=created_slice
+        ).sum(['radio', 'created']).to_series()
+        range_histogram = build_range_histogram(
+            selected_range_counts, selected_range is None
+        )
 
-    # Build created histogram
-    selected_created_counts = agg_range_created_radio.sel(
-        radio=selected_radio_categories, log10_range=range_slice
-    ).sum(['radio', 'log10_range']).to_series()
-    created_histogram = build_created_histogram(
-        selected_created_counts, selected_created is None
-    )
+        # Build created histogram
+        selected_created_counts = agg_range_created_radio.sel(
+            radio=selected_radio_categories, log10_range=range_slice
+        ).sum(['radio', 'log10_range']).to_series()
+        created_histogram = build_created_histogram(
+            selected_created_counts, selected_created is None
+        )
 
-    print(f"Update time: {time.time() - t0}")
-    return (
-        n_selected_indicator, map_graph, radio_histogram,
-        range_histogram, created_histogram
-    )
+        print(f"Update time: {time.time() - t0}")
+        return (
+            n_selected_indicator, map_graph, radio_histogram,
+            range_histogram, created_histogram
+        )
 
+    # Helper function to build figures
+    def build_radio_histogram(selected_radio_counts, selection_cleared):
+        """
+        Build horizontal histogram of radio counts
+        """
+        selectedpoints = False if selection_cleared else None
+        hovertemplate = '%{x:,.0}<extra></extra>'
 
-# Helper function to build figures
-def build_radio_histogram(selected_radio_counts, selection_cleared):
-    """
-    Build horizontal histogram of radio counts
-    """
-    selectedpoints = False if selection_cleared else None
-    hovertemplate = '%{x:,.0}<extra></extra>'
-
-    fig = {'data': [
-        {'type': 'bar',
-         'x': total_radio_counts.values,
-         'y': total_radio_counts.index,
-         'marker': {'color': bar_bgcolor},
-         'orientation': 'h',
-         "selectedpoints": selectedpoints,
-         'selected': {'marker': {'opacity': 1, 'color': bar_bgcolor}},
-         'unselected': {'marker': {'opacity': 1, 'color': bar_bgcolor}},
-         'showlegend': False,
-         'hovertemplate': hovertemplate,
-         },
-    ], 'layout': {
-        'template': template,
-        'barmode': 'overlay',
-        'dragmode': 'select',
-        'selectdirection': 'v',
-        'clickmode': 'event+select',
-        'selectionrevision': True,
-        'height': 150,
-        'margin': {'l': 10, 'r': 80, 't': 10, 'b': 10},
-        'xaxis': {
-            'type': 'log',
-            'title': {'text': 'Count'},
-            'range': [-1, np.log10(total_radio_counts.max() * 2)],
-            'automargin': True,
-        },
-        'yaxis': {
-            'type': 'category',
-            'categoryorder': 'array',
-            'categoryarray': radio_categories,
-            'side': 'left',
-            'automargin': True,
-        },
-    }}
-
-    # Add selected bars in color
-    fig['data'].append(
-        {'type': 'bar',
-         'x': selected_radio_counts.loc[total_radio_counts.index],
-         'y': total_radio_counts.index,
-         'orientation': 'h',
-         'marker': {'color': [radio_colors[cat] for cat in total_radio_counts.index]},
-         "selectedpoints": selectedpoints,
-         'unselected': {'marker': {'opacity': 0.2}},
-         'hovertemplate': hovertemplate,
-         'showlegend': False})
-
-    return fig
-
-
-def build_range_histogram(selected_range_counts, selection_cleared):
-    """
-    Build histogram of log10_range values
-    """
-    selectedpoints = False if selection_cleared else None
-    hovertemplate = (
-        "count: %{y:,.0}<br>"
-        "range: %{customdata:,} m<br>"
-        "log<sub>10</sub>(range): %{x:.2f}<br>"
-        "<extra></extra>"
-    )
-    fig = {'data': [
-        {'type': 'bar',
-         'x': total_range_counts.index,
-         'y': total_range_counts.values,
-         'customdata': (10 ** total_range_counts.index).astype('int'),
-         'marker': {'color': bar_bgcolor},
-         'hovertemplate': hovertemplate,
-         "selectedpoints": selectedpoints,
-         'unselected': {'marker': {'opacity': 1.0}},
-         "hoverinfo": "y",
-         'showlegend': False},
-    ], 'layout': {
-        'template': template,
-        'barmode': 'overlay',
-        'selectionrevision': True,
-        'height': 300,
-        'margin': {'l': 10, 'r': 10, 't': 10, 'b': 10},
-        'xaxis': {
-            'automargin': True,
-            'title': {'text': 'log<sub>10</sub>(range)'}
-        },
-        'yaxis': {
-            'type': 'log',
-            'automargin': True,
-            'title': {'text': 'Count'},
-        },
-        'selectdirection': 'h',
-        'hovermode': 'closest',
-        'dragmode': 'select',
-    }}
-
-    fig['data'].append({
-        'type': 'bar',
-        'x': selected_range_counts.index,
-        'y': selected_range_counts.values,
-        'customdata': ((10 ** selected_range_counts.index)).astype('int'),
-        'marker': {'color': bar_color},
-        'hovertemplate': hovertemplate,
-        'selected': {'marker': {'color': bar_selected_color, 'opacity': 1.0}},
-        'unselected': {'marker': {
-            'color': bar_unselected_color, 'opacity': bar_unselected_opacity
-        }},
-        "selectedpoints": selectedpoints,
-        "hoverinfo": "x+y",
-        'showlegend': False
-    })
-
-    return fig
-
-
-def build_created_histogram(selected_created_counts, selection_cleared):
-    """
-    Build histogram of creation date values
-    """
-    selectedpoints = False if selection_cleared else None
-    hovertemplate = (
-        "count: %{y:,.0}<br>"
-        "year: %{x|%Y}<br>"
-        "<extra></extra>"
-    )
-
-    fig = {
-        'data': [
+        fig = {'data': [
             {'type': 'bar',
-             'x': total_created_counts.index,
-             'y': total_created_counts.values,
+             'x': total_radio_counts.values,
+             'y': total_radio_counts.index,
              'marker': {'color': bar_bgcolor},
+             'orientation': 'h',
              "selectedpoints": selectedpoints,
-             "hovertemplate": hovertemplate,
+             'selected': {'marker': {'opacity': 1, 'color': bar_bgcolor}},
+             'unselected': {'marker': {'opacity': 1, 'color': bar_bgcolor}},
+             'showlegend': False,
+             'hovertemplate': hovertemplate,
+             },
+        ], 'layout': {
+            'template': template,
+            'barmode': 'overlay',
+            'dragmode': 'select',
+            'selectdirection': 'v',
+            'clickmode': 'event+select',
+            'selectionrevision': True,
+            'height': 150,
+            'margin': {'l': 10, 'r': 80, 't': 10, 'b': 10},
+            'xaxis': {
+                'type': 'log',
+                'title': {'text': 'Count'},
+                'range': [-1, np.log10(total_radio_counts.max() * 2)],
+                'automargin': True,
+            },
+            'yaxis': {
+                'type': 'category',
+                'categoryorder': 'array',
+                'categoryarray': radio_categories,
+                'side': 'left',
+                'automargin': True,
+            },
+        }}
+
+        # Add selected bars in color
+        fig['data'].append(
+            {'type': 'bar',
+             'x': selected_radio_counts.loc[total_radio_counts.index],
+             'y': total_radio_counts.index,
+             'orientation': 'h',
+             'marker': {'color': [radio_colors[cat] for cat in total_radio_counts.index]},
+             "selectedpoints": selectedpoints,
+             'unselected': {'marker': {'opacity': 0.2}},
+             'hovertemplate': hovertemplate,
+             'showlegend': False})
+
+        return fig
+
+
+    def build_range_histogram(selected_range_counts, selection_cleared):
+        """
+        Build histogram of log10_range values
+        """
+        selectedpoints = False if selection_cleared else None
+        hovertemplate = (
+            "count: %{y:,.0}<br>"
+            "range: %{customdata:,} m<br>"
+            "log<sub>10</sub>(range): %{x:.2f}<br>"
+            "<extra></extra>"
+        )
+        fig = {'data': [
+            {'type': 'bar',
+             'x': total_range_counts.index,
+             'y': total_range_counts.values,
+             'customdata': (10 ** total_range_counts.index).astype('int'),
+             'marker': {'color': bar_bgcolor},
+             'hovertemplate': hovertemplate,
+             "selectedpoints": selectedpoints,
              'unselected': {'marker': {'opacity': 1.0}},
              "hoverinfo": "y",
-             'showlegend': False
-             },
-        ],
-        'layout': {
+             'showlegend': False},
+        ], 'layout': {
             'template': template,
             'barmode': 'overlay',
             'selectionrevision': True,
             'height': 300,
             'margin': {'l': 10, 'r': 10, 't': 10, 'b': 10},
             'xaxis': {
-                'title': {'text': 'Date'},
-                'automargin': True
+                'automargin': True,
+                'title': {'text': 'log<sub>10</sub>(range)'}
             },
             'yaxis': {
-                'title': {'text': 'Count'},
                 'type': 'log',
-                'automargin': True
+                'automargin': True,
+                'title': {'text': 'Count'},
             },
             'selectdirection': 'h',
-            'dragmode': 'select',
             'hovermode': 'closest',
+            'dragmode': 'select',
+        }}
+
+        fig['data'].append({
+            'type': 'bar',
+            'x': selected_range_counts.index,
+            'y': selected_range_counts.values,
+            'customdata': ((10 ** selected_range_counts.index)).astype('int'),
+            'marker': {'color': bar_color},
+            'hovertemplate': hovertemplate,
+            'selected': {'marker': {'color': bar_selected_color, 'opacity': 1.0}},
+            'unselected': {'marker': {
+                'color': bar_unselected_color, 'opacity': bar_unselected_opacity
+            }},
+            "selectedpoints": selectedpoints,
+            "hoverinfo": "x+y",
+            'showlegend': False
+        })
+
+        return fig
+
+
+    def build_created_histogram(selected_created_counts, selection_cleared):
+        """
+        Build histogram of creation date values
+        """
+        selectedpoints = False if selection_cleared else None
+        hovertemplate = (
+            "count: %{y:,.0}<br>"
+            "year: %{x|%Y}<br>"
+            "<extra></extra>"
+        )
+
+        fig = {
+            'data': [
+                {'type': 'bar',
+                 'x': total_created_counts.index,
+                 'y': total_created_counts.values,
+                 'marker': {'color': bar_bgcolor},
+                 "selectedpoints": selectedpoints,
+                 "hovertemplate": hovertemplate,
+                 'unselected': {'marker': {'opacity': 1.0}},
+                 "hoverinfo": "y",
+                 'showlegend': False
+                 },
+            ],
+            'layout': {
+                'template': template,
+                'barmode': 'overlay',
+                'selectionrevision': True,
+                'height': 300,
+                'margin': {'l': 10, 'r': 10, 't': 10, 'b': 10},
+                'xaxis': {
+                    'title': {'text': 'Date'},
+                    'automargin': True
+                },
+                'yaxis': {
+                    'title': {'text': 'Count'},
+                    'type': 'log',
+                    'automargin': True
+                },
+                'selectdirection': 'h',
+                'dragmode': 'select',
+                'hovermode': 'closest',
+            }
         }
-    }
 
-    fig['data'].append({
-        'type': 'bar',
-        "hoverinfo": "x+y",
-        'x': selected_created_counts.index,
-        'y': selected_created_counts.values,
-        'marker': {'color': bar_color},
-        "selectedpoints": selectedpoints,
-        "hovertemplate": hovertemplate,
-        'selected': {'marker': {'color': bar_selected_color, 'opacity': 1.0}},
-        'unselected': {'marker': {
-            'color': bar_unselected_color, 'opacity': bar_unselected_opacity
-        }},
-        'showlegend': False
-    })
+        fig['data'].append({
+            'type': 'bar',
+            "hoverinfo": "x+y",
+            'x': selected_created_counts.index,
+            'y': selected_created_counts.values,
+            'marker': {'color': bar_color},
+            "selectedpoints": selectedpoints,
+            "hovertemplate": hovertemplate,
+            'selected': {'marker': {'color': bar_selected_color, 'opacity': 1.0}},
+            'unselected': {'marker': {
+                'color': bar_unselected_color, 'opacity': bar_unselected_opacity
+            }},
+            'showlegend': False
+        })
 
-    return fig
+        return fig
 
 
-if __name__ == '__main__':
     app.run_server(debug=False)

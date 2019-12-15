@@ -20,9 +20,8 @@ for downloading the raw data, and the notebook itself will process the data set 
 write out a compressed parquet file to the `./data` directory.
 
 ## Dask setup
-By default, this dashboard attempts to connect to a Dask distributed scheduler
-running on `localhost` at port 8786.  To change this Dask configuration, edit the Dask
-options at the top of the `app.py` file.
+By default, this dashboard creates a Dask `LocalCluster`. To change this Dask
+configuration, edit the Dask options at the top of the `app.py` file.
 
 ## Launching Dashboard
 Launch the dashboard in development mode from the command line with...
