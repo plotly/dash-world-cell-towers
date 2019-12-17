@@ -354,7 +354,11 @@ if __name__ == '__main__':
         print("done")
 
     # Load and preprocess dataset
-    ddf = dd.read_parquet('./data/cell_towers.parq')
+    ddf = None
+    if os.path.isfile('./data/cell_towers.parq'):
+        ddf = dd.read_parquet('./data/cell_towers.parq')
+    else:
+        ddf = dd.read_parquet('/data/cell_towers.parq')
     ddf['radio'] = ddf['radio'].cat.as_known()
     ddf['Description'] = ddf['Description'].cat.as_known()
     ddf['Status'] = ddf['Status'].cat.as_known()
