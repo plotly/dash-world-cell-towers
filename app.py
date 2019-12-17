@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import time
 from textwrap import dedent
 
@@ -922,4 +923,4 @@ if __name__ == '__main__':
         return fig
 
 
-    app.run_server(debug=False)
+    app.run_server(debug=False, port=os.getenv('PORT', 5000))
