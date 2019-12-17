@@ -68,7 +68,9 @@ def epsg_3857_to_4326(coords):
 
 
 # Load mapbox token
-token = open(".mapbox_token").read()
+token = os.getenv('MAPBOX_TOKEN')
+if not token:
+    token = open(".mapbox_token").read()
 
 
 def build_modal_info_overlay(id, side, content):
