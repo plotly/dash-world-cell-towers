@@ -19,6 +19,16 @@ Instead, the `notebooks/prepare_cell_data.ipynb` Jupyter notebook contains instr
 for downloading the raw data, and the notebook itself will process the data set and
 write out a compressed parquet file to the `./data` directory.
 
+Alternatively, download the `cell_towers.parq.zip` file from Google drive at
+https://drive.google.com/open?id=1mOZq24EFI0eNC2xtVEFQyPxVPHLZI9QN, then unzip it as
+`cell_towers.parq` (even though it has a file extension, this will be a directory)
+and place it at `data/cell_towers.parq`. 
+
+## Mapbox setup
+To run the dashboard, create a file name `.mapbox_token` under to root directory. This
+file should contain a valid Mapbox token, which can be obtained for free by setting up
+an account at https://www.mapbox.com/.
+
 ## Dask setup
 By default, this dashboard creates a Dask `LocalCluster`. To change this Dask
 configuration, edit the Dask options at the top of the `app.py` file.
