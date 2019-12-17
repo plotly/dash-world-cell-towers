@@ -108,7 +108,16 @@ def build_modal_info_overlay(id, side, content):
 
 
 # Build Dash layout
-app = dash.Dash(__name__)
+# set the prefix as we're using the debug server
+prefix = '/'
+if os.getenv('DASH_APP_NAME'):
+    prefix = '/{0}/'.format(os.getenv('DASH_APP_NAME'))
+
+app = dash.Dash(
+    __name__,
+    routes_pathname_prefix=prefix,
+    requests_pathname_prefix=prefix,
+)
 
 server = app.server
 
