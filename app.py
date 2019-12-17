@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import time
 from textwrap import dedent
 
@@ -67,7 +68,9 @@ def epsg_3857_to_4326(coords):
 
 
 # Load mapbox token
-token = open(".mapbox_token").read()
+token = os.getenv('MAPBOX_TOKEN')
+if not token:
+    token = open(".mapbox_token").read()
 
 
 def build_modal_info_overlay(id, side, content):
@@ -105,7 +108,21 @@ def build_modal_info_overlay(id, side, content):
 
 
 # Build Dash layout
-app = dash.Dash(__name__)
+# set the prefix as we're using the debug server
+# this typically isn't necessary with gunicorn but a lot of
+# initialization happens in the __main__ so we have to handle
+# the prefix setting ourselves.
+prefix = '/'
+if os.getenv('DASH_APP_NAME'):
+    prefix = '/{0}/'.format(os.getenv('DASH_APP_NAME'))
+
+app = dash.Dash(
+    __name__,
+    routes_pathname_prefix=prefix,
+    requests_pathname_prefix=prefix,
+)
+
+server = app.server
 
 app.layout = html.Div(children=[
     html.Div([
@@ -351,7 +368,11 @@ if __name__ == '__main__':
         print("done")
 
     # Load and preprocess dataset
-    ddf = dd.read_parquet('./data/cell_towers.parq')
+    ddf = None
+    if os.path.isfile('./data/cell_towers.parq'):
+        ddf = dd.read_parquet('./data/cell_towers.parq')
+    else:
+        ddf = dd.read_parquet('/data/cell_towers.parq')
     ddf['radio'] = ddf['radio'].cat.as_known()
     ddf['Description'] = ddf['Description'].cat.as_known()
     ddf['Status'] = ddf['Status'].cat.as_known()
@@ -921,5 +942,4 @@ if __name__ == '__main__':
 
         return fig
 
-
-    app.run_server(debug=False)
+    app.run_server(debug=False, host='0.0.0.0', port=os.getenv('PORT', 5000))
