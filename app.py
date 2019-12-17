@@ -928,5 +928,4 @@ if __name__ == '__main__':
 
         return fig
 
-
-    app.run_server(debug=False, port=os.getenv('PORT', 5000))
+    app.run_server(debug=False, host='0.0.0.0', port=os.getenv('PORT', 5000))
