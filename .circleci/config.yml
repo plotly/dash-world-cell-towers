@@ -46,5 +46,5 @@ workflows:
       - deploy_to_gallery:
           filters:
             branches:
-              ignore:
+              only:
               - master
