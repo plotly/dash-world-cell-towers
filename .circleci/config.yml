@@ -1,0 +1,52 @@
+version: 2
+jobs:
+  deploy_to_gallery:
+    docker:
+      - image: circleci/python:3.6-stretch
+    working_directory: ~/dash-sample-apps
+    environment:
+      FOO: bar
+    steps:
+      - checkout
+      - run:
+          name: Setup custom environment variables
+          command: |
+            echo "export DEPLOY_USERNAME=$GALLERY_DEPLOY_USERNAME" >> $BASH_ENV
+            echo "export DEPLOY_PASSWORD=$GALLERY_DEPLOY_PASSWORD" >> $BASH_ENV
+            echo "export DASH_ENTERPRISE_URL=$DASH_GALLERY_ENTERPRISE_URL" >> $BASH_ENV
+            echo "export APP=dash-world-cell-towers" >> $BASH_ENV
+            echo "export DDS_CLIENT_VERSION=0.1.0" >> $BASH_ENV
+            source $BASH_ENV
+      - run:
+          name: Set up git config
+          command: |
+            printf '#!/bin/bash\necho username=$DEPLOY_USERNAME\necho password=$DEPLOY_PASSWORD' >> /home/circleci/helper-script.sh
+            git remote add plotly $DASH_ENTERPRISE_URL/GIT/$CIRCLE_BRANCH
+            git config --global credential.helper "/bin/bash /home/circleci/helper-script.sh"
+            git config --global user.email '<>' # Leave email blank
+            git config --global user.name "Circle MonoRepo Automatic Deployer"
+      - run:
+          name: Install dds-client
+          command: |
+            curl -sSL -o dds-client.tgz "https://github.com/plotly/dds-client/releases/download/v${DDS_CLIENT_VERSION}/dds-client_${DDS_CLIENT_VERSION}_linux_x86_64.tgz"
+            mkdir $HOME/bin
+            tar xzf dds-client.tgz -C $HOME/bin
+            chmod +x $HOME/bin/dds-client
+      - run:
+          name: Deploy
+          command: |
+            if ! dds-client apps:exists --name "$APP" >/dev/null 2>&1; then
+              dds-client apps:create --name "$APP"
+            fi
+
+            git push plotly master
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - deploy_to_gallery:
+          filters:
+            branches:
+              ignore:
+              - master
