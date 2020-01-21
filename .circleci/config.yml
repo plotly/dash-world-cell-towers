@@ -9,16 +9,17 @@ jobs:
       - run:
           name: Setup custom environment variables
           command: |
-            echo "export DEPLOY_USERNAME=$GALLERY_DEPLOY_USERNAME" >> $BASH_ENV
-            echo "export DEPLOY_PASSWORD=$GALLERY_DEPLOY_PASSWORD" >> $BASH_ENV
+            echo "export DASH_ENTERPRISE_USERNAME=$GALLERY_DEPLOY_USERNAME" >> $BASH_ENV
+            echo "export DASH_ENTERPRISE_PASSWORD=$GALLERY_DEPLOY_PASSWORD" >> $BASH_ENV
             echo "export DASH_ENTERPRISE_URL=$DASH_GALLERY_ENTERPRISE_URL" >> $BASH_ENV
+            echo "export DASH_ENTERPRISE_API_KEY=$DASH_GALLERY_ENTERPRISE_API_KEY" >> $BASH_ENV
             echo "export APP=dash-world-cell-towers" >> $BASH_ENV
             echo "export DDS_CLIENT_VERSION=0.1.0" >> $BASH_ENV
             source $BASH_ENV
       - run:
           name: Set up git config
           command: |
-            printf '#!/bin/bash\necho username=$DEPLOY_USERNAME\necho password=$DEPLOY_PASSWORD' >> /home/circleci/helper-script.sh
+            printf '#!/bin/bash\necho username=$DASH_ENTERPRISE_USERNAME\necho password=$DASH_ENTERPRISE_PASSWORD' >> /home/circleci/helper-script.sh
             git remote add plotly $DASH_ENTERPRISE_URL/GIT/$CIRCLE_BRANCH
             git config --global credential.helper "/bin/bash /home/circleci/helper-script.sh"
             git config --global user.email '<>' # Leave email blank
