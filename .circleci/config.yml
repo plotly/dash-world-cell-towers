@@ -20,7 +20,7 @@ jobs:
           name: Set up git config
           command: |
             printf '#!/bin/bash\necho username=$DASH_ENTERPRISE_USERNAME\necho password=$DASH_ENTERPRISE_PASSWORD' >> /home/circleci/helper-script.sh
-            git remote add plotly $DASH_ENTERPRISE_URL/GIT/$CIRCLE_BRANCH
+            git remote add plotly $DASH_ENTERPRISE_URL/GIT/$APP
             git config --global credential.helper "/bin/bash /home/circleci/helper-script.sh"
             git config --global user.email '<>' # Leave email blank
             git config --global user.name "Circle MonoRepo Automatic Deployer"
