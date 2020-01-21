@@ -4,8 +4,6 @@ jobs:
     docker:
       - image: circleci/python:3.6-stretch
     working_directory: ~/dash-sample-apps
-    environment:
-      FOO: bar
     steps:
       - checkout
       - run:
