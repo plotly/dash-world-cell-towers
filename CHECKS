@@ -2,4 +2,4 @@ WAIT=90
 TIMEOUT=10
 ATTEMPTS=3
 
-/dash-world-cell-towers/_dash-layout  World Cell Towers
+/dask-celltowers/_dash-layout  World Cell Towers
