@@ -2,7 +2,7 @@ from retrying import retry
 import datashader as ds
 from pyproj import Transformer
 
-scheduler_url = "localhost:8786"
+scheduler_url = "127.0.0.1:8786"
 
 
 def compute_range_created_radio_hist(client):
