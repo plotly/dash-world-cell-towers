@@ -1,1 +1,1 @@
-web: ./launch.sh
+web: ./launch_dev.sh
