@@ -5,9 +5,9 @@ from distributed import Client
 import dask
 import pandas as pd
 
-from dash_opencellid.utils import compute_range_created_radio_hist, epsg_3857_to_4326
-
-scheduler_url = "tcp://192.168.1.193:8786"
+from dash_opencellid.utils import (
+    compute_range_created_radio_hist, epsg_3857_to_4326, scheduler_url
+)
 
 if __name__ == '__main__':
     # Note: The creation of a Dask LocalCluster must happen inside the `__main__` block,
@@ -15,10 +15,6 @@ if __name__ == '__main__':
     print(f"Connecting to cluster at {scheduler_url} ... ", end='')
     client = Client(scheduler_url)
     print("done")
-
-    # Clear any published datasets
-    for k in client.list_datasets():
-        client.unpublish_dataset(k)
 
     # Load and preprocess dataset
     if os.path.isdir('./data/cell_towers.parq'):
@@ -38,6 +34,11 @@ if __name__ == '__main__':
 
     # Persist and publish Dask dataframe in memory
     cell_towers_ddf = cell_towers_ddf.repartition(npartitions=8).persist()
+
+    # Clear any published datasets
+    for k in client.list_datasets():
+        client.unpublish_dataset(k)
+
     client.publish_dataset(cell_towers_ddf=cell_towers_ddf)
 
     data_3857 = dask.compute(

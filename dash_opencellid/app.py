@@ -16,14 +16,22 @@ import numpy as np
 import pandas as pd
 from distributed import Client
 
-# Optional: Connect to distributed dask cluster
-from dash_opencellid.utils import compute_range_created_radio_hist, epsg_4326_to_3857
+from dash_opencellid.utils import (
+    compute_range_created_radio_hist, epsg_4326_to_3857, get_dataset, scheduler_url
+)
 
+# Global initialization
+client = None
 
-scheduler_url = "tcp://192.168.1.193:8786"
-print(f"Connecting to cluster at {scheduler_url} ... ", end='')
-client = Client(scheduler_url)
-print("done")
+def init_client():
+    """
+    This function must be called before any of the functions that require a client.
+    """
+    global client
+    # Init client
+    print(f"Connecting to cluster at {scheduler_url} ... ", end='')
+    client = Client(scheduler_url)
+    print("done")
 
 
 # Radio constants
@@ -116,8 +124,6 @@ app = dash.Dash(
     routes_pathname_prefix=prefix,
     requests_pathname_prefix=prefix,
 )
-
-server = app.server
 
 app.layout = html.Div(children=[
     html.Div([
@@ -381,10 +387,10 @@ def clear_created_hist_selection(*args):
 def update_plots(
         relayout_data, selected_radio, selected_range, selected_created,
 ):
-    cell_towers_ddf = client.get_dataset('cell_towers_ddf')
-    data_4326 = client.get_dataset('data_4326')
-    data_center_4326 = client.get_dataset('data_center_4326')
-    data_3857 = client.get_dataset('data_3857')
+    cell_towers_ddf = get_dataset(client, 'cell_towers_ddf')
+    data_4326 = get_dataset(client, 'data_4326')
+    data_center_4326 = get_dataset(client, 'data_center_4326')
+    data_3857 = get_dataset(client, 'data_3857')
 
     t0 = time.time()
     coordinates_4326 = relayout_data and relayout_data.get('mapbox._derived', {}).get('coordinates', None)
@@ -681,7 +687,7 @@ def build_radio_histogram(selected_radio_counts, selection_cleared):
     """
     Build horizontal histogram of radio counts
     """
-    total_radio_counts = client.get_dataset('total_radio_counts')
+    total_radio_counts = get_dataset(client, 'total_radio_counts')
 
     selectedpoints = False if selection_cleared else None
     hovertemplate = '%{x:,.0}<extra></extra>'
@@ -741,7 +747,7 @@ def build_range_histogram(selected_range_counts, selection_cleared):
     """
     Build histogram of log10_range values
     """
-    total_range_counts = client.get_dataset('total_range_counts')
+    total_range_counts = get_dataset(client, 'total_range_counts')
 
     selectedpoints = False if selection_cleared else None
     hovertemplate = (
@@ -804,7 +810,7 @@ def build_created_histogram(selected_created_counts, selection_cleared):
     """
     Build histogram of creation date values
     """
-    total_created_counts = client.get_dataset('total_created_counts')
+    total_created_counts = get_dataset(client, 'total_created_counts')
     selectedpoints = False if selection_cleared else None
     hovertemplate = (
         "count: %{y:,.0}<br>"
@@ -864,67 +870,12 @@ def build_created_histogram(selected_created_counts, selection_cleared):
     return fig
 
 
+# gunicorn entry point
+def get_server():
+    init_client()
+    return app.server
+
+
 if __name__ == '__main__':
-    # Note: The creation of a Dask LocalCluster must happen inside the `__main__` block,
-    # that is so much logic is defined here.
-    # if scheduler_url:
-    #     print(f"Connecting to cluster at {scheduler_url} ... ", end='')
-    #     client = Client(scheduler_url)
-    #     print("done")
-    # else:
-    #     print("Creating LocalCluster... ", end='')
-    #     cluster = LocalCluster()
-    #     client = Client(cluster)
-    #     print("done")
-
-    # # Load and preprocess dataset
-    # ddf = None
-    # if os.path.isdir('./data/cell_towers.parq'):
-    #     ddf = dd.read_parquet('./data/cell_towers.parq')
-    # else:
-    #     ddf = dd.read_parquet('/data/cell_towers.parq')
-    # ddf['radio'] = ddf['radio'].cat.as_known()
-    # ddf['Description'] = ddf['Description'].cat.as_known()
-    # ddf['Status'] = ddf['Status'].cat.as_known()
-    # ddf['log10_range'] = np.log10(ddf['range'])
-    #
-    # # Select columns to persist
-    # ddf = ddf[[
-    #     'radio', 'x_3857', 'y_3857', 'log10_range', 'created',  # Filtering
-    #     'lat', 'lon', 'Description', 'Status', 'mcc', 'net'  # Hover info
-    # ]]
-    #
-    # # Persist Dask dataframe in memory
-    # ddf = ddf.repartition(npartitions=8).persist()
-    #
-    # data_3857 = dask.compute(
-    #     [ddf['x_3857'].min(), ddf['y_3857'].min()],
-    #     [ddf['x_3857'].max(), ddf['y_3857'].max()],
-    # )
-    # data_center_3857 = [[
-    #     (data_3857[0][0] + data_3857[1][0]) / 2.0,
-    #     (data_3857[0][1] + data_3857[1][1]) / 2.0,
-    # ]]
-    # data_4326 = epsg_3857_to_4326(data_3857)
-    # data_center_4326 = epsg_3857_to_4326(data_center_3857)
-    #
-    # # Create bin edges
-    # quarter_bins = pd.date_range('2003', '2020', freq='QS')
-    # created_bin_edges = quarter_bins[0::4]
-    # created_bin_centers = quarter_bins[2::4]
-    # created_bins = created_bin_edges.astype('int')
-    #
-    # min_log10_range, max_log10_range = dask.compute(
-    #     ddf['log10_range'].min(), ddf['log10_range'].max()
-    # )
-    #
-    # # Pre-compute histograms containing all observations
-    # total_range_created_radio_agg = compute_range_created_radio_hist(ddf)
-    # total_radio_counts = total_range_created_radio_agg.sum(
-    #     ['log10_range', 'created']).to_series()
-    # total_range_counts = total_range_created_radio_agg.sum(
-    #     ['radio', 'created']).to_series()
-    # total_created_counts = total_range_created_radio_agg.sum(
-    #     ['log10_range', 'radio']).to_series()
-
-    app.run_server(debug=False, host='0.0.0.0', port=os.getenv('PORT', 5001))
+    init_client()
+    app.run_server(debug=True)

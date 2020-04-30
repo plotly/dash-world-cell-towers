@@ -1,5 +1,8 @@
+from retrying import retry
 import datashader as ds
 from pyproj import Transformer
+
+scheduler_url = "localhost:8786"
 
 
 def compute_range_created_radio_hist(client):
@@ -42,3 +45,8 @@ def epsg_4326_to_3857(coords):
 
 def epsg_3857_to_4326(coords):
     return [list(reversed(transformer_3857_to_4326.transform(*row))) for row in coords]
+
+
+@retry(wait_exponential_multiplier=100, wait_exponential_max=2000, stop_max_delay=6000)
+def get_dataset(client, name):
+    return client.get_dataset(name)
