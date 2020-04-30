@@ -111,19 +111,7 @@ def build_modal_info_overlay(id, side, content):
 
 
 # Build Dash layout
-# set the prefix as we're using the debug server
-# this typically isn't necessary with gunicorn but a lot of
-# initialization happens in the __main__ so we have to handle
-# the prefix setting ourselves.
-prefix = '/'
-if os.getenv('DASH_APP_NAME'):
-    prefix = '/{0}/'.format(os.getenv('DASH_APP_NAME'))
-
-app = dash.Dash(
-    __name__,
-    routes_pathname_prefix=prefix,
-    requests_pathname_prefix=prefix,
-)
+app = dash.Dash(__name__)
 
 app.layout = html.Div(children=[
     html.Div([
