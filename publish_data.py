@@ -10,6 +10,7 @@ from dash_opencellid.utils import (
 )
 
 if __name__ == '__main__':
+    print('start publish data')
     # Note: The creation of a Dask LocalCluster must happen inside the `__main__` block,
     # that is so much logic is defined here.
     print(f"Connecting to cluster at {scheduler_url} ... ", end='')
@@ -85,3 +86,5 @@ if __name__ == '__main__':
     client.publish_dataset(total_radio_counts=total_radio_counts)
     client.publish_dataset(total_range_counts=total_range_counts)
     client.publish_dataset(total_created_counts=total_created_counts)
+
+    print('finish publish data')
