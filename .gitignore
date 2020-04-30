@@ -4,3 +4,6 @@ assets/plotly.js
 data/cell_towers.parq
 .ipynb_checkpoints/
 dask-worker-space/
+/dask/work-dir/
+/work-dir/
+*.lock
