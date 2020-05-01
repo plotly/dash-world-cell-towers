@@ -20,8 +20,6 @@ from dash_opencellid.utils import (
     compute_range_created_radio_hist, epsg_4326_to_3857, get_dataset, scheduler_url
 )
 
-print('start app import')
-
 # Global initialization
 client = None
 
@@ -377,7 +375,6 @@ def clear_created_hist_selection(*args):
 def update_plots(
         relayout_data, selected_radio, selected_range, selected_created,
 ):
-    print('update_plots')
     cell_towers_ddf = get_dataset(client, 'cell_towers_ddf')
     data_4326 = get_dataset(client, 'data_4326')
     data_center_4326 = get_dataset(client, 'data_center_4326')
@@ -863,12 +860,10 @@ def build_created_histogram(selected_created_counts, selection_cleared):
 
 # gunicorn entry point
 def get_server():
-    print('start app get_server')
     init_client()
     return app.server
 
 
 if __name__ == '__main__':
-    print('start app __main__')
     init_client()
     app.run_server(debug=True)
