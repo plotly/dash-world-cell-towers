@@ -33,13 +33,19 @@ an account at https://www.mapbox.com/.
 By default, this dashboard creates a Dask `LocalCluster`. To change this Dask
 configuration, edit the Dask options at the top of the `app.py` file.
 
-## Launching Dashboard
-Launch the dashboard in development mode from the command line with...
+## Launching Dashboard in Development Mode
+Launch the dashboard in development mode from the command line with:
 ```
-$ python app.py
+$ ./launch_dev.sh
 ```
 
 Then open the dashboard at the URL displayed by the command.
+
+## Launching Dashboard in Deploymnet Mode
+Launch the dashboard in deployment mode with gunicorn from the command line with:
+```
+$ ./launch.sh
+```
 
 ## Preview
 Initial dashboard view:
