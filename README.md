@@ -29,10 +29,6 @@ To run the dashboard, create a file name `.mapbox_token` under to root directory
 file should contain a valid Mapbox token, which can be obtained for free by setting up
 an account at https://www.mapbox.com/.
 
-## Dask setup
-By default, this dashboard creates a Dask `LocalCluster`. To change this Dask
-configuration, edit the Dask options at the top of the `app.py` file.
-
 ## Launching Dashboard in Development Mode
 Launch the dashboard in development mode from the command line with:
 ```
