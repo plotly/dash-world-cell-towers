@@ -15,6 +15,7 @@ jobs:
             echo "export DASH_ENTERPRISE_API_KEY=$DASH_GALLERY_ENTERPRISE_API_KEY" >> $BASH_ENV
             echo "export APP=dash-world-cell-towers" >> $BASH_ENV
             echo "export DDS_CLIENT_VERSION=0.1.0" >> $BASH_ENV
+            echo "export LLVM_CONFIG=/usr/bin/llvm-config-8" >> $BASH_ENV
             source $BASH_ENV
       - run:
           name: Set up git config
