@@ -32,7 +32,7 @@ $ ./launch_dev.sh
 
 Then open the dashboard at the URL displayed by the command.
 
-## Launching Dashboard in Deploymnet Mode
+## Launching Dashboard in Deployment Mode
 Launch the dashboard in deployment mode with gunicorn from the command line with:
 ```
 $ ./launch.sh
