@@ -1,4 +1,11 @@
 ## World Cell Towers Dash App
+
+<div align="center">
+  <a href="https://dash.plotly.com/project-maintenance">
+    <img src="https://dash.plotly.com/assets/images/maintained-by-plotly.png" width="400px" alt="Maintained by Plotly">
+  </a>
+</div>
+
 This repo contains a Python [Dash](https://dash.plot.ly) app for exploring the world
 cell tower dataset provided by [OpenCellid](https://www.opencellid.org/).
 
